@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         TORN CITY Calendar Alerter
 // @namespace    sanxion.tc.calendaralert
-// @version      1.5.0
+// @version      1.7.0
 // @description  Reads the calendar API to show the player up and coming events.
 // @author       Sanxion [2987640]
 // @match        https://www.torn.com/*
-// @updateURL    https://github.com/Quantarallax/Torn-City-Weather-Forecast/raw/refs/heads/main/Torn%20City%20Weather%20Forecast.user.js
-// @downloadURL  https://github.com/Quantarallax/Torn-City-Weather-Forecast/raw/refs/heads/main/Torn%20City%20Weather%20Forecast.user.js
+// @updateURL    https://github.com/Quantarallax/Torn-City-Calendar-Alerter/raw/refs/heads/main/TORN%20CITY%20Calendar%20Alerter.user.js
+// @downloadURL  https://github.com/Quantarallax/Torn-City-Calendar-Alerter/raw/refs/heads/main/TORN%20CITY%20Calendar%20Alerter.user.js
 // @license      MIT
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -14,29 +14,29 @@
 
 /*
  * Torn Calendar Alerter
- * ---------------------
- * Embedded widget showing the next three events from the Torn calendar API,
- * with days remaining until each event (or 'Event in progress.').
  *
- * NOTE: @updateURL / @downloadURL are PLACEHOLDERS until the repository is set up.
- * NOTE: the StatCounter project and security values are PLACEHOLDERS.
+ * An embedded widget for Torn City that reads the Torn calendar API and
+ * shows the next three events with the days remaining until each one, or
+ * 'Event in progress.' while one is running. It can sit across the top of
+ * the main page area or in the left sidebar, minimises to a single line,
+ * and remembers its settings between visits.
  */
 
 (function () {
     'use strict';
 
-    var SCRIPT_VERSION = '1.5.0'; // Keep in lockstep with @version header.
+    var SCRIPT_VERSION = '1.7.0';
     var WIDGET_TITLE = 'Torn Calendar Alerter';
     var STORE_KEY = 'tcca_settings_v1';
-    var API_REFRESH_MS = 15 * 60 * 1000; // Re-fetch calendar every 15 minutes.
-    var TICK_MS = 60 * 1000; // Re-render countdowns every minute.
-    var WATCHDOG_MS = 2000; // Re-mount if Torn's SPA removes the widget.
+    var API_REFRESH_MS = 15 * 60 * 1000;
+    var TICK_MS = 60 * 1000;
+    var WATCHDOG_MS = 2000;
     var DAY_MS = 24 * 60 * 60 * 1000;
     var WIDGET_ID = 'tcca-widget';
     var KEY_INPUT_ID = 'tcca-in-key';
     var KEY_STATUS_ID = 'tcca-key-status';
     var TIP_ID = 'tcca-tip';
-    var TIP_AUDIT_MS = 400; // Sweep for a tooltip whose element has gone.
+    var TIP_AUDIT_MS = 400;
     var SCHEMES = ['default', 'torn', 'bw'];
     var SCHEME_LABELS = {
         default: 'Default',
@@ -44,29 +44,25 @@
         bw: 'Black and White'
     };
 
-    // window.console rather than the bare global, so no-console stays quiet.
     function log(message) {
         if (window.console && window.console.info) {
             window.console.info('[Torn Calendar Alerter] ' + message);
         }
     }
 
-    // --------------------------------------------------------------
-    // Settings (persistent via GM_setValue / GM_getValue)
-    // --------------------------------------------------------------
     var DEFAULT_SETTINGS = {
-        apiKeyEnc: '', // Obfuscated on the way in, never stored as typed.
-        position: 'Top', // 'Left' or 'Top'
+        apiKeyEnc: '',
+        position: 'Top',
         minimised: true,
         scheme: 'bw',
-        redMax: 3, // 0..redMax days -> red
-        yellowMax: 6, // redMax+1..yellowMax days -> yellow, above -> green
-        settingsOpen: false // The panel reopens where you left it.
+        redMax: 3,
+        yellowMax: 6,
+        settingsOpen: false
     };
 
     var state = {
         settings: Object.assign({}, DEFAULT_SETTINGS),
-        apiKey: '', // Plain key, held in memory only.
+        apiKey: '',
         events: [],
         fetchError: '',
         keyStatus: '',
@@ -75,11 +71,6 @@
         lastFetch: 0
     };
 
-    // --------------------------------------------------------------
-    // Key obfuscation. This keeps the key from sitting in storage in
-    // plain sight; it is not encryption and is not a substitute for
-    // using a Public Only key.
-    // --------------------------------------------------------------
     var OBF_SALT = 'tcca-sanxion';
 
     function xorText(text) {
@@ -141,7 +132,7 @@
                 out[k] = parsed[k];
             }
         });
-        // Carry over a key saved in plain text by an earlier version.
+
         if (!out.apiKeyEnc && parsed.apiKey) {
             out.apiKeyEnc = obfuscate(String(parsed.apiKey));
         }
@@ -152,9 +143,6 @@
         GM_setValue(STORE_KEY, JSON.stringify(state.settings));
     }
 
-    // --------------------------------------------------------------
-    // Styles
-    // --------------------------------------------------------------
     var CSS_RULES = [
         '#tcca-widget { box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;',
         '  font-size: 12px; border-radius: 5px; position: relative; margin: 6px 0;',
@@ -162,7 +150,6 @@
         '#tcca-widget * { box-sizing: border-box; }',
         '#tcca-widget a { text-decoration: underline; }',
 
-        /* Header bar */
         '.tcca-header { display: flex; align-items: center; padding: 5px 8px;',
         '  border-radius: 5px 5px 0 0; }',
         '.tcca-min .tcca-header { border-radius: 5px; }',
@@ -174,8 +161,15 @@
         '  border-radius: 3px; }',
         '.tcca-btn:hover { filter: brightness(1.35); }',
         '.tcca-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }',
+        '.tcca-actions { display: flex; align-items: center; flex: 0 0 auto; margin-left: auto; }',
 
-        /* Body: Top runs left to right, depth about half the sidebar width */
+        '.tcca-pos-left .tcca-header { flex-wrap: wrap; padding: 4px 6px; }',
+        '.tcca-pos-left .tcca-title { flex: 1 1 auto; min-width: 0; margin-right: 4px;',
+        '  overflow: hidden; text-overflow: ellipsis; font-size: 11px; }',
+        '.tcca-pos-left .tcca-summary { order: 3; flex: 1 1 100%; margin-top: 3px;',
+        '  white-space: normal; }',
+        '.tcca-pos-left .tcca-btn { padding: 2px 4px; margin-left: 2px; }',
+
         '.tcca-body { padding: 6px 8px; border-radius: 0 0 5px 5px; }',
         '.tcca-pos-top .tcca-body { display: flex; flex-direction: row; gap: 8px;',
         '  min-height: 100px; align-items: stretch; }',
@@ -189,12 +183,10 @@
         '.tcca-badge { font-weight: bold; white-space: nowrap; }',
         '.tcca-msg { padding: 4px 2px; }',
 
-        /* Highlight colours (days to event) */
         '.tcca-hl-red { background: #a32020; color: #ffffff; }',
         '.tcca-hl-yellow { background: #d8c24a; color: #1c1c1c; }',
         '.tcca-hl-green { background: #2e7d32; color: #ffffff; }',
 
-        /* Settings panel */
         '.tcca-settings { padding: 8px; border-radius: 0 0 5px 5px; }',
         '.tcca-settings.tcca-overlay { position: absolute; top: 0; left: 0; z-index: 999999;',
         '  min-width: 300px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }',
@@ -219,7 +211,6 @@
         '  border-top: 1px solid rgba(255,255,255,0.25); }',
         '.tcca-version { margin-top: 4px; opacity: 0.85; }',
 
-        /* Colour scheme: Default */
         '.tcca-scheme-default { background: #22303f; color: #e8eef4; border: 1px solid #3d5064; }',
         '.tcca-scheme-default .tcca-header { background: linear-gradient(#33465a, #263646); }',
         '.tcca-scheme-default .tcca-settings { background: #22303f; }',
@@ -228,8 +219,6 @@
         '.tcca-scheme-default .tcca-row select { background: #16202b; color: #e8eef4;',
         '  border-color: #3d5064; }',
 
-        /* Colour scheme: Torn. Grey look and feel, white text in the main window.
-           The darkest greys are lifted so they stay readable on the blue page. */
         '.tcca-scheme-torn { background: #444444; color: #ffffff; border: 1px solid #7a7a7a; }',
         '.tcca-scheme-torn .tcca-header { background: linear-gradient(#5a5a5a, #3f3f3f);',
         '  color: #ffffff; }',
@@ -240,7 +229,6 @@
         '.tcca-scheme-torn .tcca-row select { background: #3a3a3a; color: #ffffff;',
         '  border-color: #8a8a8a; }',
 
-        /* Colour scheme: Black and White */
         '.tcca-scheme-bw { background: #000000; color: #ffffff; border: 1px solid #ffffff; }',
         '.tcca-scheme-bw .tcca-header { background: #111111; color: #ffffff; }',
         '.tcca-scheme-bw .tcca-settings { background: #000000; color: #ffffff; }',
@@ -251,7 +239,6 @@
         '.tcca-scheme-bw .tcca-row select { background: #111111; color: #ffffff;',
         '  border-color: #ffffff; }',
 
-        /* One managed tooltip, so nothing can stack or linger */
         '#tcca-tip { position: fixed; top: 0; left: 0; z-index: 2147483647;',
         '  max-width: 320px; padding: 6px 9px; border-radius: 4px; pointer-events: none;',
         '  font: 12px/1.45 Arial, Helvetica, sans-serif; white-space: pre-line;',
@@ -259,7 +246,6 @@
         '#tcca-tip.tcca-tip-on { visibility: visible; opacity: 1; }',
         '#tcca-tip .tcca-tip-head { font-weight: bold; }',
 
-        /* Last resort placement if no Torn container is found */
         '.tcca-fixed-top { position: fixed; top: 0; left: 0; right: 0; z-index: 999998;',
         '  margin: 0; border-radius: 0; }',
         '.tcca-fixed-left { position: fixed; top: 60px; left: 0; width: 200px;',
@@ -276,9 +262,6 @@
         document.head.appendChild(styleEl);
     }
 
-    // --------------------------------------------------------------
-    // Calendar API
-    // --------------------------------------------------------------
     function calendarUrl(key) {
         return 'https://api.torn.com/v2/torn/calendar?key=' + encodeURIComponent(key);
     }
@@ -347,9 +330,6 @@
         return text.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
     }
 
-    // --------------------------------------------------------------
-    // Time helpers (TCT is UTC)
-    // --------------------------------------------------------------
     function pad(n) {
         return n < 10 ? '0' + n : String(n);
     }
@@ -403,6 +383,16 @@
         return days + (days === 1 ? ' day' : ' days');
     }
 
+    function summaryText(ev) {
+        if (state.settings.position === 'Left') {
+            return ev.title + ': ' + badgeText(ev);
+        }
+        if (isInProgress(ev)) {
+            return ev.title + ' \u2014 Event in progress.';
+        }
+        return 'Next: ' + ev.title + ' \u2014 ' + badgeText(ev);
+    }
+
     function eventTooltip(ev) {
         var lines = [ev.title];
         if (ev.description) {
@@ -418,19 +408,6 @@
         return lines.join('\n');
     }
 
-    // --------------------------------------------------------------
-    // Tooltips
-    //
-    // Native title attributes stack when elements are nested, so one
-    // managed element is used instead and the innermost tip wins.
-    //
-    // Clearing cannot depend on events fired by the widget. Minimising,
-    // redrawing or an SPA navigation can delete the hovered element
-    // while the cursor sits still, and no mouseleave follows, which
-    // strands the tooltip on screen. So the listeners live on the
-    // document, and an audit sweeps up any tooltip whose element has
-    // gone.
-    // --------------------------------------------------------------
     function setTip(el, text) {
         if (text) {
             el.dataset.tccaTip = text;
@@ -498,9 +475,6 @@
         return node.closest('[data-tcca-tip]');
     }
 
-    // The cursor is somewhere on the page. Show a tip only when it is
-    // over a live tipped element inside the widget, and clear it in
-    // every other case, including anywhere outside the widget.
     function onTipMove(ev) {
         var widget = getWidget();
         var target = tipTargetOf(ev.target);
@@ -513,8 +487,6 @@
         showTip(target.dataset.tccaTip, ev.clientX, ev.clientY);
     }
 
-    // Catches the stranded cases: the element was replaced or removed
-    // while the cursor never moved, so no event was ever going to fire.
     function auditTip() {
         if (!tipVisible()) {
             return;
@@ -545,9 +517,6 @@
         setInterval(auditTip, TIP_AUDIT_MS);
     }
 
-    // --------------------------------------------------------------
-    // Rendering
-    // --------------------------------------------------------------
     function getWidget() {
         return document.getElementById(WIDGET_ID);
     }
@@ -600,9 +569,7 @@
                 summary.textContent = state.fetchError;
                 setTip(summary, state.fetchError);
             } else if (next) {
-                summary.textContent = isInProgress(next)
-                    ? next.title + ' \u2014 Event in progress.'
-                    : 'Next: ' + next.title + ' \u2014 ' + badgeText(next);
+                summary.textContent = summaryText(next);
                 setTip(summary, eventTooltip(next));
             } else {
                 summary.textContent = 'No upcoming events.';
@@ -620,7 +587,11 @@
             saveSettings();
             render();
         });
-        header.appendChild(minBtn);
+
+        var actions = document.createElement('span');
+        actions.className = 'tcca-actions';
+        actions.appendChild(minBtn);
+        header.appendChild(actions);
 
         var cogBtn = document.createElement('button');
         cogBtn.className = 'tcca-btn';
@@ -632,7 +603,7 @@
             saveSettings();
             render();
         });
-        header.appendChild(cogBtn);
+        actions.appendChild(cogBtn);
 
         return header;
     }
@@ -692,9 +663,6 @@
         return body;
     }
 
-    // --------------------------------------------------------------
-    // API key: saves and tests itself, no Save settings needed
-    // --------------------------------------------------------------
     function setKeyStatus(text, kind) {
         state.keyStatus = text;
         var el = document.getElementById(KEY_STATUS_ID);
@@ -748,8 +716,6 @@
             });
     }
 
-    // Redraw the header and body without touching the open settings panel,
-    // so the key field keeps focus and the status line stays put.
     function refreshWidgetOnly() {
         var widget = getWidget();
         if (!widget) {
@@ -791,8 +757,7 @@
     function buildSettings(widget) {
         var panel = document.createElement('div');
         panel.className = 'tcca-settings';
-        // Inline by default. If the widget is too narrow to hold the settings
-        // page, open it as a window over the widget, sized to fit.
+
         if (widget.offsetWidth > 0 && widget.offsetWidth < 320) {
             panel.classList.add('tcca-overlay');
         }
@@ -886,7 +851,6 @@
         var posEl = document.getElementById('tcca-in-pos');
         var oldPos = state.settings.position;
 
-        // Catch a key typed but never blurred, so nothing is lost on save.
         if (keyEl && keyEl.value.trim() !== state.apiKey) {
             commitApiKey(keyEl.value);
         }
@@ -961,9 +925,6 @@
         return n;
     }
 
-    // --------------------------------------------------------------
-    // Mounting
-    // --------------------------------------------------------------
     function findHost() {
         if (state.settings.position === 'Left') {
             return document.getElementById('sidebarroot') ||
@@ -988,7 +949,6 @@
         var host = findHost();
 
         if (host && state.settings.position === 'Left') {
-            // Top left, under the logo: the logo is the sidebar's first block.
             var logo = host.firstElementChild;
             if (logo && logo.nextSibling) {
                 host.insertBefore(widget, logo.nextSibling);
@@ -998,7 +958,6 @@
         } else if (host) {
             host.insertBefore(widget, host.firstChild);
         } else if (document.body) {
-            // Nothing recognised on the page, so pin it instead of hiding.
             widget.classList.add(state.settings.position === 'Left'
                 ? 'tcca-fixed-left'
                 : 'tcca-fixed-top');
@@ -1021,11 +980,8 @@
         mount();
     }
 
-    // --------------------------------------------------------------
-    // StatCounter (PLACEHOLDER: replace these values with the new code)
-    // --------------------------------------------------------------
-    var SC_PROJECT = '13223765';
-    var SC_SECURITY = '67b1fe3b';
+    var SC_PROJECT = '13341844';
+    var SC_SECURITY = '464b0670';
 
     function fireStatCounter() {
         if (!document.body) {
@@ -1042,9 +998,6 @@
         document.body.appendChild(img);
     }
 
-    // --------------------------------------------------------------
-    // Boot
-    // --------------------------------------------------------------
     log('v' + SCRIPT_VERSION + ' starting.');
     state.settings = loadSettings();
     state.apiKey = deobfuscate(state.settings.apiKeyEnc);
@@ -1053,8 +1006,6 @@
     mount();
     log(getWidget() ? 'Widget mounted.' : 'Widget could not mount yet, retrying.');
 
-    // Torn's SPA replaces large parts of the page, so put the widget back
-    // whenever it disappears rather than mounting only once.
     setInterval(mount, WATCHDOG_MS);
 
     fetchCalendar();
