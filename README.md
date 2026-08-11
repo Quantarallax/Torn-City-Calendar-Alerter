@@ -16,7 +16,7 @@ And, at top, minimised.
 
 <img width="1388" height="71" alt="image" src="https://github.com/user-attachments/assets/a55de056-85f4-4b7a-ac83-99815fb84887" />
 
-And, positioned at top, open.
+And, positioned to the left, open.
 
 <img width="309" height="482" alt="image" src="https://github.com/user-attachments/assets/f26ad7bd-1e3e-4714-b6ce-aeefaf78437d" />
 
